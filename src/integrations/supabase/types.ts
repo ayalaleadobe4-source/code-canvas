@@ -14,7 +14,163 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      edit_sessions: {
+        Row: {
+          base_branch: string
+          base_commit_sha: string | null
+          created_at: string
+          id: string
+          project_id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          base_branch: string
+          base_commit_sha?: string | null
+          created_at?: string
+          id?: string
+          project_id: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          base_branch?: string
+          base_commit_sha?: string | null
+          created_at?: string
+          id?: string
+          project_id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "edit_sessions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      github_connections: {
+        Row: {
+          access_token: string
+          connected_at: string
+          github_user_id: number
+          github_username: string
+          scope: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          connected_at?: string
+          github_user_id: number
+          github_username: string
+          scope?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          connected_at?: string
+          github_user_id?: number
+          github_username?: string
+          scope?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      pending_changes: {
+        Row: {
+          created_at: string
+          element_loc: string | null
+          file_path: string
+          id: string
+          modified_content: string
+          original_content: string | null
+          session_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          element_loc?: string | null
+          file_path: string
+          id?: string
+          modified_content: string
+          original_content?: string | null
+          session_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          element_loc?: string | null
+          file_path?: string
+          id?: string
+          modified_content?: string
+          original_content?: string | null
+          session_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_changes_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "edit_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+        }
+        Relationships: []
+      }
+      projects: {
+        Row: {
+          created_at: string
+          default_branch: string
+          id: string
+          repo_name: string
+          repo_owner: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          default_branch?: string
+          id?: string
+          repo_name: string
+          repo_owner: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          default_branch?: string
+          id?: string
+          repo_name?: string
+          repo_owner?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
