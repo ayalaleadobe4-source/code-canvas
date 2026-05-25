@@ -1,10 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import {
-  buildGithubAuthorizeUrl,
-  getOctokitForUser,
-} from "./github.server";
+import { buildGithubAuthorizeUrl, getOctokitForUser } from "./github.server";
+
+const githubFilePathSchema = z
+  .string()
+  .min(1)
+  .refine((path) => !path.startsWith("/") && !path.includes(".."), "Invalid file path");
+
+function buildVisualEditBranchName() {
+  return `lovable-visual-edit-${Date.now()}`;
+}
 
 export const getGithubAuthUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -51,7 +57,13 @@ export const listMyRepos = createServerFn({ method: "GET" })
 export const addProject = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
-    z.object({ owner: z.string().min(1), name: z.string().min(1), default_branch: z.string().min(1) }).parse(d),
+    z
+      .object({
+        owner: z.string().min(1),
+        name: z.string().min(1),
+        default_branch: z.string().min(1),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
@@ -93,9 +105,7 @@ export const getProject = createServerFn({ method: "POST" })
 
 export const getRepoTree = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) =>
-    z.object({ projectId: z.string().uuid() }).parse(d),
-  )
+  .inputValidator((d) => z.object({ projectId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { data: proj } = await context.supabase
       .from("projects")
@@ -127,7 +137,7 @@ export const getRepoTree = createServerFn({ method: "POST" })
 export const getFileContent = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
-    z.object({ projectId: z.string().uuid(), path: z.string().min(1) }).parse(d),
+    z.object({ projectId: z.string().uuid(), path: githubFilePathSchema }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const { data: proj } = await context.supabase
@@ -155,7 +165,7 @@ export const commitFileChange = createServerFn({ method: "POST" })
     z
       .object({
         projectId: z.string().uuid(),
-        path: z.string().min(1),
+        path: githubFilePathSchema,
         content: z.string(),
         message: z.string().min(1).max(200),
       })
@@ -175,7 +185,6 @@ export const commitFileChange = createServerFn({ method: "POST" })
     const repo = proj.repo_name;
     const base = proj.default_branch;
 
-    // Get base ref
     const { data: baseRef } = await octo.git.getRef({
       owner,
       repo,
@@ -183,8 +192,7 @@ export const commitFileChange = createServerFn({ method: "POST" })
     });
     const baseSha = baseRef.object.sha;
 
-    // Create new branch
-    const branch = `lovable-visual-edit-${Date.now()}`;
+    const branch = buildVisualEditBranchName();
     await octo.git.createRef({
       owner,
       repo,
@@ -192,7 +200,6 @@ export const commitFileChange = createServerFn({ method: "POST" })
       sha: baseSha,
     });
 
-    // Get existing file sha on that branch
     let fileSha: string | undefined;
     try {
       const { data: existing } = await octo.repos.getContent({
@@ -208,8 +215,7 @@ export const commitFileChange = createServerFn({ method: "POST" })
       // file may not exist yet
     }
 
-    // Commit change
-    await octo.repos.createOrUpdateFileContents({
+    const { data: commitResult } = await octo.repos.createOrUpdateFileContents({
       owner,
       repo,
       path: data.path,
@@ -219,15 +225,26 @@ export const commitFileChange = createServerFn({ method: "POST" })
       sha: fileSha,
     });
 
-    // Open PR
     const { data: pr } = await octo.pulls.create({
       owner,
       repo,
       title: data.message,
       head: branch,
       base,
-      body: `Edited via Lovable Visual Editor.\n\n- File: \`${data.path}\``,
+      body: [
+        "Edited via Lovable Visual Editor.",
+        "",
+        `- File: \`${data.path}\``,
+        `- Base branch: \`${base}\``,
+        `- Edit branch: \`${branch}\``,
+      ].join("\n"),
     });
 
-    return { branch, prUrl: pr.html_url, prNumber: pr.number };
+    return {
+      branch,
+      baseBranch: base,
+      commitSha: commitResult.commit.sha,
+      prUrl: pr.html_url,
+      prNumber: pr.number,
+    };
   });
