@@ -1,19 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, FileCode2, Loader2, GitPullRequest, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  getProject,
-  getRepoTree,
-  getFileContent,
-  commitFileChange,
-} from "@/lib/github.functions";
+import { getProject, getRepoTree, getFileContent, commitFileChange } from "@/lib/github.functions";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
   component: ProjectView,
@@ -29,6 +24,7 @@ function ProjectView() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [draft, setDraft] = useState<string>("");
   const [message, setMessage] = useState<string>("");
+  const prWindowRef = useRef<Window | null>(null);
 
   const proj = useQuery({
     queryKey: ["project", projectId],
@@ -59,20 +55,44 @@ function ProjectView() {
           projectId,
           path: selectedPath!,
           content: draft,
-          message: message || `Edit ${selectedPath}`,
+          message: message.trim() || `Edit ${selectedPath}`,
         },
       }),
     onSuccess: (res) => {
+      const prWindow = prWindowRef.current;
+      prWindowRef.current = null;
+      if (prWindow && !prWindow.closed) {
+        prWindow.location.href = res.prUrl;
+      } else {
+        window.open(res.prUrl, "_blank", "noopener,noreferrer");
+      }
       toast.success("Pull request created", {
-        description: `Branch ${res.branch} → PR #${res.prNumber}`,
+        description: `Branch ${res.branch} -> PR #${res.prNumber}`,
         action: { label: "Open", onClick: () => window.open(res.prUrl, "_blank") },
       });
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      if (prWindowRef.current && !prWindowRef.current.closed) {
+        prWindowRef.current.close();
+      }
+      prWindowRef.current = null;
+      toast.error(e.message);
+    },
   });
 
   const project = proj.data?.project;
   const dirty = file.data && draft !== file.data.content;
+
+  const onCommitAndOpenPr = () => {
+    if (!dirty || commit.isPending) return;
+    prWindowRef.current = window.open("", "_blank");
+    if (prWindowRef.current) {
+      prWindowRef.current.document.title = "Opening GitHub PR";
+      prWindowRef.current.document.body.textContent = "Opening GitHub pull request...";
+      prWindowRef.current.opener = null;
+    }
+    commit.mutate();
+  };
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-6">
@@ -128,14 +148,10 @@ function ProjectView() {
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-xs font-medium uppercase text-muted-foreground">
               {selectedPath ?? "Select a file"}
-              {dirty && <span className="ml-2 text-amber-600">● unsaved</span>}
+              {dirty && <span className="ml-2 text-amber-600">unsaved</span>}
             </span>
             {selectedPath && (
-              <Button
-                size="sm"
-                disabled={!dirty || commit.isPending}
-                onClick={() => commit.mutate()}
-              >
+              <Button size="sm" disabled={!dirty || commit.isPending} onClick={onCommitAndOpenPr}>
                 {commit.isPending ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                 ) : (
@@ -162,6 +178,7 @@ function ProjectView() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="Commit message"
+                maxLength={200}
                 className="m-2"
               />
               <Textarea
@@ -172,8 +189,8 @@ function ProjectView() {
               />
               <div className="flex items-center gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
                 <Save className="h-3 w-3" />
-                Changes are pushed to a new branch and opened as a PR on{" "}
-                {project ? `${project.repo_owner}/${project.repo_name}` : "GitHub"}.
+                Changes are pushed to a new lovable-visual-edit timestamp branch and opened as a PR
+                on {project ? `${project.repo_owner}/${project.repo_name}` : "GitHub"}.
               </div>
             </div>
           )}
@@ -181,7 +198,7 @@ function ProjectView() {
       </div>
 
       <p className="mt-4 text-xs text-muted-foreground">
-        ✨ Next: visual overlay editor (click elements to edit text/styles) + AST-based patching.
+        Next: visual overlay editor (overlay + data-loc + AST patching).
       </p>
     </main>
   );
