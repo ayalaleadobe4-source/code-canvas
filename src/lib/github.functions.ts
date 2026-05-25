@@ -148,3 +148,86 @@ export const getFileContent = createServerFn({ method: "POST" })
     const content = Buffer.from(file.content, file.encoding as BufferEncoding).toString("utf8");
     return { content, sha: file.sha, path: file.path };
   });
+
+export const commitFileChange = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        projectId: z.string().uuid(),
+        path: z.string().min(1),
+        content: z.string(),
+        message: z.string().min(1).max(200),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: proj } = await context.supabase
+      .from("projects")
+      .select("*")
+      .eq("id", data.projectId)
+      .maybeSingle();
+    if (!proj) throw new Error("Project not found");
+    const octo = await getOctokitForUser(context.userId);
+    if (!octo) throw new Error("GitHub not connected");
+
+    const owner = proj.repo_owner;
+    const repo = proj.repo_name;
+    const base = proj.default_branch;
+
+    // Get base ref
+    const { data: baseRef } = await octo.git.getRef({
+      owner,
+      repo,
+      ref: `heads/${base}`,
+    });
+    const baseSha = baseRef.object.sha;
+
+    // Create new branch
+    const branch = `lovable-visual-edit-${Date.now()}`;
+    await octo.git.createRef({
+      owner,
+      repo,
+      ref: `refs/heads/${branch}`,
+      sha: baseSha,
+    });
+
+    // Get existing file sha on that branch
+    let fileSha: string | undefined;
+    try {
+      const { data: existing } = await octo.repos.getContent({
+        owner,
+        repo,
+        path: data.path,
+        ref: branch,
+      });
+      if (!Array.isArray(existing) && existing.type === "file") {
+        fileSha = existing.sha;
+      }
+    } catch {
+      // file may not exist yet
+    }
+
+    // Commit change
+    await octo.repos.createOrUpdateFileContents({
+      owner,
+      repo,
+      path: data.path,
+      message: data.message,
+      content: Buffer.from(data.content, "utf8").toString("base64"),
+      branch,
+      sha: fileSha,
+    });
+
+    // Open PR
+    const { data: pr } = await octo.pulls.create({
+      owner,
+      repo,
+      title: data.message,
+      head: branch,
+      base,
+      body: `Edited via Lovable Visual Editor.\n\n- File: \`${data.path}\``,
+    });
+
+    return { branch, prUrl: pr.html_url, prNumber: pr.number };
+  });
