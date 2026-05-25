@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedProjectsRouteImport } from './routes/_authenticated/projects'
+import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated/projects.$projectId'
 import { Route as ApiPublicGithubCallbackRouteImport } from './routes/api/public/github.callback'
 
 const LoginRoute = LoginRouteImport.update({
@@ -34,6 +35,12 @@ const AuthenticatedProjectsRoute = AuthenticatedProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedProjectsProjectIdRoute =
+  AuthenticatedProjectsProjectIdRouteImport.update({
+    id: '/$projectId',
+    path: '/$projectId',
+    getParentRoute: () => AuthenticatedProjectsRoute,
+  } as any)
 const ApiPublicGithubCallbackRoute = ApiPublicGithubCallbackRouteImport.update({
   id: '/api/public/github/callback',
   path: '/api/public/github/callback',
@@ -43,13 +50,15 @@ const ApiPublicGithubCallbackRoute = ApiPublicGithubCallbackRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/projects': typeof AuthenticatedProjectsRoute
+  '/projects': typeof AuthenticatedProjectsRouteWithChildren
+  '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRoute
   '/api/public/github/callback': typeof ApiPublicGithubCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/projects': typeof AuthenticatedProjectsRoute
+  '/projects': typeof AuthenticatedProjectsRouteWithChildren
+  '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRoute
   '/api/public/github/callback': typeof ApiPublicGithubCallbackRoute
 }
 export interface FileRoutesById {
@@ -57,20 +66,32 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
-  '/_authenticated/projects': typeof AuthenticatedProjectsRoute
+  '/_authenticated/projects': typeof AuthenticatedProjectsRouteWithChildren
+  '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRoute
   '/api/public/github/callback': typeof ApiPublicGithubCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/projects' | '/api/public/github/callback'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/projects'
+    | '/projects/$projectId'
+    | '/api/public/github/callback'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/projects' | '/api/public/github/callback'
+  to:
+    | '/'
+    | '/login'
+    | '/projects'
+    | '/projects/$projectId'
+    | '/api/public/github/callback'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/login'
     | '/_authenticated/projects'
+    | '/_authenticated/projects/$projectId'
     | '/api/public/github/callback'
   fileRoutesById: FileRoutesById
 }
@@ -111,6 +132,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProjectsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/projects/$projectId': {
+      id: '/_authenticated/projects/$projectId'
+      path: '/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdRouteImport
+      parentRoute: typeof AuthenticatedProjectsRoute
+    }
     '/api/public/github/callback': {
       id: '/api/public/github/callback'
       path: '/api/public/github/callback'
@@ -121,12 +149,25 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedProjectsRouteChildren {
+  AuthenticatedProjectsProjectIdRoute: typeof AuthenticatedProjectsProjectIdRoute
+}
+
+const AuthenticatedProjectsRouteChildren: AuthenticatedProjectsRouteChildren = {
+  AuthenticatedProjectsProjectIdRoute: AuthenticatedProjectsProjectIdRoute,
+}
+
+const AuthenticatedProjectsRouteWithChildren =
+  AuthenticatedProjectsRoute._addFileChildren(
+    AuthenticatedProjectsRouteChildren,
+  )
+
 interface AuthenticatedRouteChildren {
-  AuthenticatedProjectsRoute: typeof AuthenticatedProjectsRoute
+  AuthenticatedProjectsRoute: typeof AuthenticatedProjectsRouteWithChildren
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
-  AuthenticatedProjectsRoute: AuthenticatedProjectsRoute,
+  AuthenticatedProjectsRoute: AuthenticatedProjectsRouteWithChildren,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
