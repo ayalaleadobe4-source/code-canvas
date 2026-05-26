@@ -1,14 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   FileCode2,
   Loader2,
   GitPullRequest,
-  Save,
   Type,
+  Plus,
+  Trash2,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -21,7 +23,11 @@ import {
   getProject,
   getRepoTree,
   getFileContent,
-  commitFileChange,
+  getOrCreateSession,
+  upsertPendingChange,
+  listPendingChanges,
+  discardPendingChange,
+  commitSession,
 } from "@/lib/github.functions";
 import { extractEditableTexts, applyTextEdits } from "@/lib/jsx-texts";
 
@@ -31,10 +37,16 @@ export const Route = createFileRoute("/_authenticated/projects/$projectId")({
 
 function ProjectView() {
   const { projectId } = Route.useParams();
+  const qc = useQueryClient();
+
   const getProjectFn = useServerFn(getProject);
   const getTreeFn = useServerFn(getRepoTree);
   const getFileFn = useServerFn(getFileContent);
-  const commitFn = useServerFn(commitFileChange);
+  const sessionFn = useServerFn(getOrCreateSession);
+  const upsertFn = useServerFn(upsertPendingChange);
+  const listChangesFn = useServerFn(listPendingChanges);
+  const discardFn = useServerFn(discardPendingChange);
+  const commitFn = useServerFn(commitSession);
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [draft, setDraft] = useState<string>("");
@@ -50,6 +62,26 @@ function ProjectView() {
     queryFn: () => getTreeFn({ data: { projectId } }),
     enabled: !!proj.data?.project,
   });
+  const session = useQuery({
+    queryKey: ["session", projectId],
+    queryFn: () => sessionFn({ data: { projectId } }),
+    enabled: !!proj.data?.project,
+  });
+  const sessionId = session.data?.session?.id;
+  const pending = useQuery({
+    queryKey: ["pending", sessionId],
+    queryFn: () => listChangesFn({ data: { sessionId: sessionId! } }),
+    enabled: !!sessionId,
+  });
+
+  const pendingByPath = useMemo(() => {
+    const m = new Map<string, { id: string; modified_content: string }>();
+    pending.data?.changes.forEach((c) =>
+      m.set(c.file_path, { id: c.id, modified_content: c.modified_content }),
+    );
+    return m;
+  }, [pending.data]);
+
   const file = useQuery({
     queryKey: ["file", projectId, selectedPath],
     queryFn: () => getFileFn({ data: { projectId, path: selectedPath! } }),
@@ -57,14 +89,14 @@ function ProjectView() {
   });
 
   useEffect(() => {
-    if (file.data?.content !== undefined) {
-      setDraft(file.data.content);
-      setMessage(`Edit ${selectedPath}`);
+    if (file.data?.content !== undefined && selectedPath) {
+      const pendingForFile = pendingByPath.get(selectedPath);
+      setDraft(pendingForFile?.modified_content ?? file.data.content);
       setTextOverrides({});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.data, selectedPath]);
 
-  // Texts derived from the *original* file content so offsets stay stable.
   const texts = useMemo(() => {
     if (!file.data?.content) return [];
     const isJsx = /\.(tsx|jsx)$/i.test(selectedPath ?? "");
@@ -72,7 +104,6 @@ function ProjectView() {
     return extractEditableTexts(file.data.content);
   }, [file.data, selectedPath]);
 
-  // Compose the draft sent to GitHub: apply text overrides to the original.
   const composedDraft = useMemo(() => {
     if (!file.data?.content) return draft;
     if (Object.keys(textOverrides).length === 0) return draft;
@@ -82,27 +113,52 @@ function ProjectView() {
     return applyTextEdits(file.data.content, edits);
   }, [file.data, draft, texts, textOverrides]);
 
+  const dirty = !!file.data && composedDraft !== file.data.content;
+
+  const addToBatch = useMutation({
+    mutationFn: () =>
+      upsertFn({
+        data: {
+          sessionId: sessionId!,
+          filePath: selectedPath!,
+          originalContent: file.data?.content,
+          modifiedContent: composedDraft,
+        },
+      }),
+    onSuccess: () => {
+      toast.success(`${selectedPath} added to batch`);
+      qc.invalidateQueries({ queryKey: ["pending", sessionId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const discard = useMutation({
+    mutationFn: (id: string) => discardFn({ data: { id } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pending", sessionId] }),
+  });
+
   const commit = useMutation({
     mutationFn: () =>
       commitFn({
         data: {
-          projectId,
-          path: selectedPath!,
-          content: composedDraft,
-          message: message || `Edit ${selectedPath}`,
+          sessionId: sessionId!,
+          message: message || `Batched edits (${pending.data?.changes.length})`,
         },
       }),
     onSuccess: (res) => {
-      toast.success("Pull request created", {
-        description: `Branch ${res.branch} → PR #${res.prNumber}`,
+      toast.success(`PR #${res.prNumber} created`, {
+        description: `${res.fileCount} files on ${res.branch}`,
         action: { label: "Open", onClick: () => window.open(res.prUrl, "_blank") },
       });
+      setMessage("");
+      qc.invalidateQueries({ queryKey: ["session", projectId] });
+      qc.invalidateQueries({ queryKey: ["pending"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const project = proj.data?.project;
-  const dirty = !!file.data && composedDraft !== file.data.content;
+  const pendingCount = pending.data?.changes.length ?? 0;
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-6">
@@ -123,7 +179,8 @@ function ProjectView() {
       </div>
 
       <div className="grid grid-cols-12 gap-4">
-        <aside className="col-span-4 rounded-lg border bg-card">
+        {/* File tree */}
+        <aside className="col-span-3 rounded-lg border bg-card">
           <div className="border-b px-3 py-2 text-xs font-medium uppercase text-muted-foreground">
             Files
           </div>
@@ -140,25 +197,32 @@ function ProjectView() {
               <ul className="p-2">
                 {tree.data?.tree
                   .filter((f) => /\.(tsx?|jsx?|css|md|json|html)$/i.test(f.path))
-                  .map((f) => (
-                    <li key={f.sha}>
-                      <button
-                        onClick={() => setSelectedPath(f.path)}
-                        className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-accent ${
-                          selectedPath === f.path ? "bg-accent font-medium" : ""
-                        }`}
-                      >
-                        <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="truncate">{f.path}</span>
-                      </button>
-                    </li>
-                  ))}
+                  .map((f) => {
+                    const queued = pendingByPath.has(f.path);
+                    return (
+                      <li key={f.sha}>
+                        <button
+                          onClick={() => setSelectedPath(f.path)}
+                          className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-accent ${
+                            selectedPath === f.path ? "bg-accent font-medium" : ""
+                          }`}
+                        >
+                          <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="flex-1 truncate">{f.path}</span>
+                          {queued && (
+                            <span className="h-2 w-2 rounded-full bg-amber-500" />
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
               </ul>
             </ScrollArea>
           )}
         </aside>
 
-        <section className="col-span-8 rounded-lg border bg-card">
+        {/* Editor */}
+        <section className="col-span-6 rounded-lg border bg-card">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-xs font-medium uppercase text-muted-foreground">
               {selectedPath ?? "Select a file"}
@@ -167,15 +231,15 @@ function ProjectView() {
             {selectedPath && (
               <Button
                 size="sm"
-                disabled={!dirty || commit.isPending}
-                onClick={() => commit.mutate()}
+                disabled={!dirty || addToBatch.isPending || !sessionId}
+                onClick={() => addToBatch.mutate()}
               >
-                {commit.isPending ? (
+                {addToBatch.isPending ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                 ) : (
-                  <GitPullRequest className="mr-1 h-4 w-4" />
+                  <Plus className="mr-1 h-4 w-4" />
                 )}
-                Commit & open PR
+                Add to batch
               </Button>
             )}
           </div>
@@ -209,13 +273,6 @@ function ProjectView() {
                   </TabsTrigger>
                 </TabsList>
               </div>
-
-              <Input
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="Commit message"
-                className="m-2"
-              />
 
               <TabsContent value="visual" className="m-0 flex-1 overflow-hidden">
                 {texts.length === 0 ? (
@@ -269,18 +326,76 @@ function ProjectView() {
                   spellCheck={false}
                 />
               </TabsContent>
-
-              <div className="flex items-center gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
-                <Save className="h-3 w-3" />
-                Changes push to a new branch and open as a PR on{" "}
-                {project
-                  ? `${project.repo_owner}/${project.repo_name}`
-                  : "GitHub"}
-                .
-              </div>
             </Tabs>
           )}
         </section>
+
+        {/* Batch panel */}
+        <aside className="col-span-3 rounded-lg border bg-card">
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <span className="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <Layers className="h-3.5 w-3.5" /> Batch
+            </span>
+            <Badge variant={pendingCount ? "default" : "secondary"}>
+              {pendingCount}
+            </Badge>
+          </div>
+
+          <div className="p-3">
+            {pendingCount === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No queued changes. Edit a file and click "Add to batch".
+              </p>
+            ) : (
+              <ScrollArea className="h-[40vh]">
+                <ul className="space-y-1">
+                  {pending.data?.changes.map((c) => (
+                    <li
+                      key={c.id}
+                      className="flex items-center gap-1 rounded border px-2 py-1 text-xs"
+                    >
+                      <FileCode2 className="h-3 w-3 text-muted-foreground" />
+                      <button
+                        onClick={() => setSelectedPath(c.file_path)}
+                        className="flex-1 truncate text-left hover:underline"
+                      >
+                        {c.file_path}
+                      </button>
+                      <button
+                        onClick={() => discard.mutate(c.id)}
+                        className="text-muted-foreground hover:text-destructive"
+                        title="Discard"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+            )}
+
+            <div className="mt-3 space-y-2 border-t pt-3">
+              <Input
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Commit message"
+                className="text-sm"
+              />
+              <Button
+                className="w-full"
+                disabled={pendingCount === 0 || commit.isPending}
+                onClick={() => commit.mutate()}
+              >
+                {commit.isPending ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <GitPullRequest className="mr-1 h-4 w-4" />
+                )}
+                Commit {pendingCount} file{pendingCount === 1 ? "" : "s"} as PR
+              </Button>
+            </div>
+          </div>
+        </aside>
       </div>
     </main>
   );
