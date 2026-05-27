@@ -10,12 +10,12 @@ export const Route = createFileRoute("/")({
 function Home() {
   const { user } = useAuth();
   return (
-    <div className="min-h-screen bg-background">
+    <div style={{ transform: "none" , fontSize: "48px" }} className="min-h-screen bg-background">
       <header className="border-b">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2">
             <Code2 className="h-6 w-6 text-primary" />
-            <span className="font-semibold">Visual Editor for Lovable</span>
+            <span src="/placeholder.svg" className="font-semibold">Visual Editor for Lovable</span>
           </div>
           <nav className="flex items-center gap-3">
             {user ? (
@@ -33,12 +33,12 @@ function Home() {
 
       <main className="mx-auto max-w-6xl px-6 py-20">
         <section className="text-center">
-          <h1 className="text-5xl font-bold tracking-tight text-foreground sm:text-6xl">
+          <h1 style={{ color: "#ffffff" }} className="text-5xl font-bold tracking-tight text-foreground sm:text-6xl">
             Edit your Lovable projects
             <br />
-            <span className="text-primary">visually</span>, push to GitHub.
+            <span style={{ color: "#2563eb" }} className="text-primary">visually</span>, push to GitHub.
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
+          <p style={{ color: "#db2777" }} className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
             Connect a GitHub repo, point-and-click to change text, colors, spacing — every edit becomes a
             real commit on a branch and a pull request.
           </p>

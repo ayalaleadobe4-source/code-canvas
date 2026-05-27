@@ -1,3 +1,8 @@
+/* KVS_VISUAL_EDITOR_START */
+import { useEffect } from "react";
+import { initKvsOverlayClient } from "../../.kvs/kvs-overlay-client";
+/* KVS_VISUAL_EDITOR_END */
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -98,7 +103,19 @@ function RootComponent() {
       <AuthProvider>
         <Outlet />
         <Toaster />
+        <KvsVisualEditorMount />
       </AuthProvider>
     </QueryClientProvider>
   );
 }
+/* KVS_VISUAL_EDITOR_START */
+function KvsVisualEditorMount() {
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      initKvsOverlayClient();
+    }
+  }, []);
+  return null;
+}
+/* KVS_VISUAL_EDITOR_END */
+
